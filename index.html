@@ -158,11 +158,11 @@ button{cursor:pointer}
     <div class="section-label">02 &nbsp; Tell their story</div>
     <div class="field">
       <label for="friend">Their name</label>
-      <input id="friend" maxlength="28" placeholder="e.g. Maya" value="your person">
+      <input id="friend" maxlength="28" placeholder="e.g. Bushra" value="Bushra">
     </div>
     <div class="field">
       <label for="from">This little gift is from</label>
-      <input id="from" maxlength="28" placeholder="Your name" value="your bestie">
+      <input id="from" maxlength="28" placeholder="Your name" value="Huzaifa">
     </div>
     <div class="field">
       <label for="memory">A note only you could write</label>
@@ -175,14 +175,14 @@ button{cursor:pointer}
       <span class="plus">＋</span>
       <span>
         <strong>Choose photos from your camera roll</strong>
-        <small>Pick up to 3 little moments · saved with your gift</small>
+        <small>Pick up to 3 little moments · saved directly into your share link</small>
       </span>
       <input type="file" id="photos" accept="image/*" multiple>
     </label>
     <div id="photo-row" class="photo-row" hidden></div>
     
     <button class="primary full" id="create">Make the surprise link <span>↗</span></button>
-    <div class="hint" style="text-align:center;margin-top:10px">Short link ready instantly. Just a little love, ready to send.</div>
+    <div class="hint" style="text-align:center;margin-top:10px">Works on any mobile phone anywhere in the world!</div>
   </section>
 
   <!-- LIVE PREVIEW & GIFT CARD -->
@@ -197,7 +197,7 @@ button{cursor:pointer}
       <span class="spark s2">♡</span>
       <span class="spark s3">✧</span>
       <div class="gift-kicker">a little something, just for you</div>
-      <h3>For <span class="friend" id="p-friend">your person</span><br>with all my <span class="friend">heart</span></h3>
+      <h3>For <span class="friend" id="p-friend">Bushra</span><br>with all my <span class="friend">heart</span></h3>
       <div class="gift-sub">A tiny collection of us, and all the good in between.</div>
       
       <div class="collage">
@@ -207,7 +207,7 @@ button{cursor:pointer}
       </div>
       
       <div class="note" id="p-memory">For all the belly laughs, the 2am talks, and every version of me you’ve loved. Life is softer with you in it. 💗</div>
-      <div class="from">made with love by <strong id="p-from">your bestie</strong></div>
+      <div class="from">made with love by <strong id="p-from">Huzaifa</strong></div>
       <div class="gift-footer">a little love note <span>♥</span> that’s yours to keep</div>
 
       <button class="reply-btn" id="reply-wa">💬 Send a hug back on WhatsApp</button>
@@ -217,7 +217,7 @@ button{cursor:pointer}
       <button id="copy">▣ &nbsp; Copy surprise link</button>
       <button id="whatsapp">☏ &nbsp; Send on WhatsApp</button>
     </div>
-    <div class="footnote">Photos are saved with this gift and shown to anyone who has its short link.</div>
+    <div class="footnote">Photos are embedded in this gift and shown to anyone who opens its WhatsApp link.</div>
   </section>
 </main>
 
@@ -226,6 +226,9 @@ button{cursor:pointer}
 <script>
 const $=s=>document.querySelector(s), friend=$('#friend'), from=$('#from'), memory=$('#memory');
 let photoUrls=[], sharedPhotos=[];
+
+// PUBLIC GITHUB PAGES BASE URL FOR PHONE COMPATIBILITY
+const PUBLIC_BASE_URL = 'https://mohdhuzaifakhan.github.io/whats-app-msg-for-bestie/';
 
 function refresh(){
   $('#p-friend').textContent=friend.value.trim()||'your person';
@@ -244,13 +247,14 @@ document.querySelectorAll('.theme').forEach(b=>b.addEventListener('click',()=>{
 
 async function compressPhoto(file){
   const bitmap=await createImageBitmap(file);
-  const scale=Math.min(1,400/Math.max(bitmap.width,bitmap.height));
+  // Max 320px thumbnail size & 0.45 quality produces super small base64 (~5KB)
+  const scale=Math.min(1,320/Math.max(bitmap.width,bitmap.height));
   const canvas=document.createElement('canvas');
   canvas.width=Math.max(1,Math.round(bitmap.width*scale));
   canvas.height=Math.max(1,Math.round(bitmap.height*scale));
   canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);
   bitmap.close();
-  return canvas.toDataURL('image/jpeg',.50);
+  return canvas.toDataURL('image/jpeg',.45);
 }
 
 $('#photos').addEventListener('change',async e=>{
@@ -303,10 +307,7 @@ function toast(s){
   setTimeout(()=>$('#toast').classList.remove('show'),2400);
 }
 
-// SHORT LINK CREATION LOGIC
-let savedPayload='', savedLink='';
-
-// Base64 helper for fallback
+// UTF-8 Safe Base64 Helper
 function encodeB64(obj){
   const str = JSON.stringify(obj);
   return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (match, p1) => String.fromCharCode('0x' + p1)));
@@ -319,47 +320,38 @@ function decodeB64(str){
   } catch(e) { return null; }
 }
 
+// UNIVERSAL STANDALONE LINK CREATION (WORKS ON PHONE, LAPTOP, WHATSAPP)
+let savedPayload='', savedLink='';
+
 async function makeUrl(){
   const gift = { ...payload(), p: sharedPhotos };
   const signature = JSON.stringify(gift);
   if (signature === savedPayload && savedLink) return savedLink;
 
-  try {
-    // 1. Try local server API endpoint /api/gifts (produces short link like /g/ab12cd34)
-    const response = await fetch('/api/gifts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: signature
-    });
-    if (response.ok) {
-      const result = await response.json();
-      savedPayload = signature;
-      savedLink = result.url;
-      return savedLink;
-    }
-  } catch(err) {
-    // API not reachable (e.g. opened directly in browser or static host)
+  // Use public GitHub Pages base URL if running on localhost so link opens on phone!
+  let baseUrl = window.location.origin + window.location.pathname;
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    baseUrl = PUBLIC_BASE_URL;
   }
 
-  // 2. Client-side Short Storage + TinyURL fallback for static sites
-  const shortId = Math.random().toString(36).substring(2, 9);
-  localStorage.setItem('gift_' + shortId, signature);
-  
-  // Try TinyURL API to shorten full payload link into a clean ~20 char link!
-  const fullPayloadUrl = `${window.location.origin}${window.location.pathname}#gift=${encodeB64(gift)}`;
+  // Full URL with embedded photos & text
+  const fullPayloadUrl = `${baseUrl}#gift=${encodeB64(gift)}`;
+
+  // Try shortening via TinyURL so WhatsApp link is neat and short
   try {
     const tinyRes = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(fullPayloadUrl)}`);
     if (tinyRes.ok) {
       const tinyUrl = await tinyRes.text();
-      savedPayload = signature;
-      savedLink = tinyUrl;
-      return savedLink;
+      if (tinyUrl && tinyUrl.startsWith('http')) {
+        savedPayload = signature;
+        savedLink = tinyUrl.trim();
+        return savedLink;
+      }
     }
   } catch(e) {}
 
-  // Fallback to local short fragment #g=shortId
   savedPayload = signature;
-  savedLink = `${window.location.origin}${window.location.pathname}#g=${shortId}`;
+  savedLink = fullPayloadUrl;
   return savedLink;
 }
 
@@ -404,9 +396,10 @@ function setRecipientView(data){
 
 async function shareLink(){
   try {
+    toast('Creating phone-compatible link...');
     const link = await makeUrl();
     await navigator.clipboard.writeText(link);
-    toast('Your short gift link is ready — copied!');
+    toast('Gift link created — copied!');
     return link;
   } catch(err) {
     toast('Could not create gift link.');
@@ -437,9 +430,19 @@ $('#brand-link').addEventListener('click', (e) => {
   }
 });
 
-// ROUTE HANDLER: Recipient detection via /g/:id OR #g=:id OR #gift=:payload
+// ROUTE HANDLER: Recipient detection via #gift=:b64 OR /g/:id
 (async function initRoute(){
-  // 1. Check Path /g/:id
+  // 1. Check Hash #gift=:b64
+  if (location.hash.includes('#gift=')) {
+    const b64Data = location.hash.split('#gift=')[1];
+    const data = decodeB64(b64Data);
+    if (data) {
+      setRecipientView(data);
+      return;
+    }
+  }
+
+  // 2. Check Path /g/:id
   const pathId = location.pathname.match(/^\/g\/([A-Za-z0-9_-]{6,12})$/)?.[1];
   if (pathId) {
     try {
@@ -450,28 +453,6 @@ $('#brand-link').addEventListener('click', (e) => {
         return;
       }
     } catch(e) {}
-  }
-
-  // 2. Check Hash #g=:id (local short ID)
-  if (location.hash.includes('#g=')) {
-    const localId = location.hash.split('#g=')[1];
-    const rawData = localStorage.getItem('gift_' + localId);
-    if (rawData) {
-      try {
-        setRecipientView(JSON.parse(rawData));
-        return;
-      } catch(e) {}
-    }
-  }
-
-  // 3. Check Hash #gift=:b64
-  if (location.hash.includes('#gift=')) {
-    const b64Data = location.hash.split('#gift=')[1];
-    const data = decodeB64(b64Data);
-    if (data) {
-      setRecipientView(data);
-      return;
-    }
   }
 
   refresh();
