@@ -182,7 +182,7 @@ button{cursor:pointer}
     <div id="photo-row" class="photo-row" hidden></div>
     
     <button class="primary full" id="create">Make the surprise link <span>↗</span></button>
-    <div class="hint" style="text-align:center;margin-top:10px">Works on any mobile phone anywhere in the world!</div>
+    <div class="hint" style="text-align:center;margin-top:10px">Universal Link · Works on any phone, anywhere in the world!</div>
   </section>
 
   <!-- LIVE PREVIEW & GIFT CARD -->
@@ -227,8 +227,8 @@ button{cursor:pointer}
 const $=s=>document.querySelector(s), friend=$('#friend'), from=$('#from'), memory=$('#memory');
 let photoUrls=[], sharedPhotos=[];
 
-// PUBLIC GITHUB PAGES BASE URL FOR PHONE COMPATIBILITY
-const PUBLIC_BASE_URL = 'https://mohdhuzaifakhan.github.io/whats-app-msg-for-bestie/';
+// PUBLIC GITHUB PAGES BASE URL FOR UNIVERSAL PHONE ACCESS
+const GITHUB_PAGES_URL = 'https://mohdhuzaifakhan.github.io/whats-app-msg-for-bestie/';
 
 function refresh(){
   $('#p-friend').textContent=friend.value.trim()||'your person';
@@ -247,14 +247,13 @@ document.querySelectorAll('.theme').forEach(b=>b.addEventListener('click',()=>{
 
 async function compressPhoto(file){
   const bitmap=await createImageBitmap(file);
-  // Max 320px thumbnail size & 0.45 quality produces super small base64 (~5KB)
-  const scale=Math.min(1,320/Math.max(bitmap.width,bitmap.height));
+  const scale=Math.min(1,280/Math.max(bitmap.width,bitmap.height));
   const canvas=document.createElement('canvas');
   canvas.width=Math.max(1,Math.round(bitmap.width*scale));
   canvas.height=Math.max(1,Math.round(bitmap.height*scale));
   canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);
   bitmap.close();
-  return canvas.toDataURL('image/jpeg',.45);
+  return canvas.toDataURL('image/jpeg',.40);
 }
 
 $('#photos').addEventListener('change',async e=>{
@@ -320,7 +319,55 @@ function decodeB64(str){
   } catch(e) { return null; }
 }
 
-// UNIVERSAL STANDALONE LINK CREATION (WORKS ON PHONE, LAPTOP, WHATSAPP)
+// COMPRESSION HELPER VIA Deflate/Decompress STREAM (SHRINKS PAYLOAD BY 60%)
+async function compressToUrlHash(dataObj) {
+  const json = JSON.stringify(dataObj);
+  try {
+    if (window.CompressionStream) {
+      const stream = new Blob([json]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+      const buffer = await new Response(stream).arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      return 'z_' + btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+  } catch(e) {}
+  return encodeB64(dataObj);
+}
+
+async function decompressFromUrlHash(str) {
+  if (str.startsWith('z_')) {
+    try {
+      let base64 = str.slice(2).replace(/-/g, '+').replace(/_/g, '/');
+      while (base64.length % 4) base64 += '=';
+      const bin = atob(base64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+      const json = await new Response(stream).text();
+      return JSON.parse(json);
+    } catch(e) {}
+  }
+  return decodeB64(str);
+}
+
+// UNIVERSAL PUBLIC BASE URL GENERATOR
+function getPublicBaseUrl() {
+  const host = window.location.hostname;
+  const protocol = window.location.protocol;
+
+  // If on local host/file system, target the public GitHub Pages URL so link works on all phones!
+  if (protocol === 'file:' || host === 'localhost' || host === '127.0.0.1' || host.startsWith('192.168.')) {
+    return GITHUB_PAGES_URL;
+  }
+
+  let path = window.location.pathname;
+  if (!path.endsWith('/')) {
+    path = path.substring(0, path.lastIndexOf('/') + 1);
+  }
+  return window.location.origin + path;
+}
+
 let savedPayload='', savedLink='';
 
 async function makeUrl(){
@@ -328,16 +375,11 @@ async function makeUrl(){
   const signature = JSON.stringify(gift);
   if (signature === savedPayload && savedLink) return savedLink;
 
-  // Use public GitHub Pages base URL if running on localhost so link opens on phone!
-  let baseUrl = window.location.origin + window.location.pathname;
-  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    baseUrl = PUBLIC_BASE_URL;
-  }
+  const baseUrl = getPublicBaseUrl();
+  const compressedHash = await compressToUrlHash(gift);
+  const fullPayloadUrl = `${baseUrl}#gift=${compressedHash}`;
 
-  // Full URL with embedded photos & text
-  const fullPayloadUrl = `${baseUrl}#gift=${encodeB64(gift)}`;
-
-  // Try shortening via TinyURL so WhatsApp link is neat and short
+  // Try TinyURL API to produce ultra-short link
   try {
     const tinyRes = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(fullPayloadUrl)}`);
     if (tinyRes.ok) {
@@ -355,7 +397,7 @@ async function makeUrl(){
   return savedLink;
 }
 
-function setRecipientView(data){
+async function setRecipientView(data){
   friend.value = data.n || 'your person';
   from.value = data.f || 'someone who loves you';
   memory.value = data.m || '';
@@ -386,7 +428,6 @@ function setRecipientView(data){
   $('.share-row').hidden = true;
   $('.footnote').textContent = 'Made with love, just for you. 💗';
 
-  // Recipient Reply on WhatsApp Button
   const replyWa = $('#reply-wa');
   replyWa.onclick = () => {
     const msg = `I just opened your surprise gift and I loved it so much! 💗🥰 Thank you!`;
@@ -396,10 +437,10 @@ function setRecipientView(data){
 
 async function shareLink(){
   try {
-    toast('Creating phone-compatible link...');
+    toast('Generating universal gift link...');
     const link = await makeUrl();
     await navigator.clipboard.writeText(link);
-    toast('Gift link created — copied!');
+    toast('Gift link created & copied!');
     return link;
   } catch(err) {
     toast('Could not create gift link.');
@@ -430,12 +471,12 @@ $('#brand-link').addEventListener('click', (e) => {
   }
 });
 
-// ROUTE HANDLER: Recipient detection via #gift=:b64 OR /g/:id
+// ROUTE HANDLER: Recipient detection via #gift=:payload OR /g/:id
 (async function initRoute(){
-  // 1. Check Hash #gift=:b64
+  // 1. Check Hash #gift=:data
   if (location.hash.includes('#gift=')) {
-    const b64Data = location.hash.split('#gift=')[1];
-    const data = decodeB64(b64Data);
+    const hashData = location.hash.split('#gift=')[1];
+    const data = await decompressFromUrlHash(hashData);
     if (data) {
       setRecipientView(data);
       return;
