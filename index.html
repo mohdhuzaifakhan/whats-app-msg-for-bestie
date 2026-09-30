@@ -368,6 +368,71 @@ function getPublicBaseUrl() {
   return window.location.origin + path;
 }
 
+// JSONP Shortener Helper for is.gd & v.gd (100% CORS-Free)
+function shortenUrlIsGd(longUrl) {
+  return new Promise((resolve) => {
+    const cb = 'cb_' + Math.random().toString(36).substring(2, 8);
+    let timer = setTimeout(() => {
+      delete window[cb];
+      if (script.parentNode) script.remove();
+      resolve(null);
+    }, 4000);
+
+    window[cb] = function(res) {
+      clearTimeout(timer);
+      delete window[cb];
+      if (script.parentNode) script.remove();
+      if (res && res.shorturl) {
+        resolve(res.shorturl);
+      } else {
+        resolve(null);
+      }
+    };
+
+    const script = document.createElement('script');
+    script.src = `https://is.gd/create.php?format=jsonp&callback=${cb}&url=${encodeURIComponent(longUrl)}`;
+    script.onerror = () => {
+      clearTimeout(timer);
+      delete window[cb];
+      if (script.parentNode) script.remove();
+      resolve(null);
+    };
+    document.head.appendChild(script);
+  });
+}
+
+function shortenUrlVGd(longUrl) {
+  return new Promise((resolve) => {
+    const cb = 'cbv_' + Math.random().toString(36).substring(2, 8);
+    let timer = setTimeout(() => {
+      delete window[cb];
+      if (script.parentNode) script.remove();
+      resolve(null);
+    }, 4000);
+
+    window[cb] = function(res) {
+      clearTimeout(timer);
+      delete window[cb];
+      if (script.parentNode) script.remove();
+      if (res && res.shorturl) {
+        resolve(res.shorturl);
+      } else {
+        resolve(null);
+      }
+    };
+
+    const script = document.createElement('script');
+    script.src = `https://v.gd/create.php?format=jsonp&callback=${cb}&url=${encodeURIComponent(longUrl)}`;
+    script.onerror = () => {
+      clearTimeout(timer);
+      delete window[cb];
+      if (script.parentNode) script.remove();
+      resolve(null);
+    };
+    document.head.appendChild(script);
+  });
+}
+
 let savedPayload='', savedLink='';
 
 async function makeUrl(){
@@ -375,22 +440,43 @@ async function makeUrl(){
   const signature = JSON.stringify(gift);
   if (signature === savedPayload && savedLink) return savedLink;
 
-  const baseUrl = getPublicBaseUrl();
-  const compressedHash = await compressToUrlHash(gift);
-  const fullPayloadUrl = `${baseUrl}#gift=${compressedHash}`;
-
-  // Try TinyURL API to produce ultra-short link
+  // 1. Try local server endpoint /api/gifts if running node server.js
   try {
-    const tinyRes = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(fullPayloadUrl)}`);
-    if (tinyRes.ok) {
-      const tinyUrl = await tinyRes.text();
-      if (tinyUrl && tinyUrl.startsWith('http')) {
+    const apiRes = await fetch('/api/gifts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: signature
+    });
+    if (apiRes.ok) {
+      const data = await apiRes.json();
+      if (data && data.url) {
         savedPayload = signature;
-        savedLink = tinyUrl.trim();
+        savedLink = data.url;
         return savedLink;
       }
     }
   } catch(e) {}
+
+  // 2. Build public payload URL
+  const baseUrl = getPublicBaseUrl();
+  const compressedHash = await compressToUrlHash(gift);
+  const fullPayloadUrl = `${baseUrl}#gift=${compressedHash}`;
+
+  // 3. Shorten via is.gd (JSONP - 100% CORS-Free, ~18 chars)
+  const isGdUrl = await shortenUrlIsGd(fullPayloadUrl);
+  if (isGdUrl) {
+    savedPayload = signature;
+    savedLink = isGdUrl;
+    return savedLink;
+  }
+
+  // 4. Shorten via v.gd (JSONP fallback)
+  const vGdUrl = await shortenUrlVGd(fullPayloadUrl);
+  if (vGdUrl) {
+    savedPayload = signature;
+    savedLink = vGdUrl;
+    return savedLink;
+  }
 
   savedPayload = signature;
   savedLink = fullPayloadUrl;
